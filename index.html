@@ -483,10 +483,74 @@
             #game-over-title { font-size: 2.6em; letter-spacing: 7px; }
             #key-hints { display: none; }
             .action-row { gap: 12px; }
+            #player-actions,
+            #player2-actions,
+            #guest-actions {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                padding-bottom: env(safe-area-inset-bottom, 12px);
+                background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 100%);
+            }
         }
         button { touch-action: manipulation; }
 
-        /* ── COSMETICS ── */
+        /* ── LOCKER ── */
+        #locker-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+            width: 320px;
+        }
+        #locker-title {
+            font-size: 0.65em;
+            letter-spacing: 8px;
+            color: #cc0000;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        #locker-subtitle {
+            font-size: 0.52em;
+            letter-spacing: 5px;
+            color: #3a0000;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+        .locker-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            width: 100%;
+        }
+        .locker-card {
+            background: rgba(4,0,2,0.92);
+            border: 1px solid #4a0000;
+            padding: 12px 12px 14px;
+            box-shadow: 0 0 10px rgba(139,0,0,0.25), inset 0 0 18px rgba(0,0,0,0.6);
+        }
+        .locker-card-title {
+            font-size: 0.52em;
+            letter-spacing: 5px;
+            color: #6b003a;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        .locker-card .row {
+            display:flex;
+            flex-direction:column;
+            gap:10px;
+        }
+        .locker-back-row {
+            display:flex;
+            gap:12px;
+            width:100%;
+            justify-content:center;
+            margin-top: 6px;
+        }
+
+        /* ── COSMETICS (legacy - kept for now) ── */
         #cosmetics-screen {
             display: flex;
             flex-direction: column;
@@ -740,7 +804,52 @@
                 <button id="mode-ai">VS AI</button>
                 <button id="mode-local">LOCAL 2P</button>
                 <button id="mode-online">ONLINE 2P</button>
+                <button id="mode-locker">LOCKER</button>
             </div>
+            <div id="locker-screen" class="hidden">
+                <div id="locker-title">LOCKER</div>
+                <div id="locker-subtitle">FREE COSMETICS</div>
+
+                <div class="locker-grid">
+                    <div class="locker-card">
+                        <div class="locker-card-title">PLAYER 1</div>
+                        <div class="row">
+                            <input id="locker-p1-name" placeholder="Enter name..." maxlength="12" autocomplete="off" spellcheck="false">
+                            <div id="locker-p1-accent-label" style="font-size:0.5em;letter-spacing:6px;color:#3a0000;text-transform:uppercase;">COLOR</div>
+                            <div id="locker-p1-swatches">
+                                <button class="swatch active" data-player="p1" data-color="#cc0000" style="background:#cc0000" title="Crimson"></button>
+                                <button class="swatch" data-player="p1" data-color="#2255cc" style="background:#2255cc" title="Cobalt"></button>
+                                <button class="swatch" data-player="p1" data-color="#00aa44" style="background:#00aa44" title="Emerald"></button>
+                                <button class="swatch" data-player="p1" data-color="#cc8800" style="background:#cc8800" title="Gold"></button>
+                                <button class="swatch" data-player="p1" data-color="#9922cc" style="background:#9922cc" title="Violet"></button>
+                                <button class="swatch" data-player="p1" data-color="#999999" style="background:#999999" title="Silver"></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="locker-card">
+                        <div class="locker-card-title">PLAYER 2</div>
+                        <div class="row">
+                            <input id="locker-p2-name" placeholder="Enter name..." maxlength="12" autocomplete="off" spellcheck="false">
+                            <div id="locker-p2-accent-label" style="font-size:0.5em;letter-spacing:6px;color:#3a0000;text-transform:uppercase;">COLOR</div>
+                            <div id="locker-p2-swatches">
+                                <button class="swatch active" data-player="p2" data-color="#2255cc" style="background:#2255cc" title="Cobalt"></button>
+                                <button class="swatch" data-player="p2" data-color="#cc0000" style="background:#cc0000" title="Crimson"></button>
+                                <button class="swatch" data-player="p2" data-color="#00aa44" style="background:#00aa44" title="Emerald"></button>
+                                <button class="swatch" data-player="p2" data-color="#cc8800" style="background:#cc8800" title="Gold"></button>
+                                <button class="swatch" data-player="p2" data-color="#9922cc" style="background:#9922cc" title="Violet"></button>
+                                <button class="swatch" data-player="p2" data-color="#999999" style="background:#999999" title="Silver"></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="locker-back-row">
+                    <button id="locker-save-btn">SAVE</button>
+                    <button id="locker-back-btn">BACK</button>
+                </div>
+            </div>
+
             <div id="cosmetics-screen" class="hidden">
                 <div id="cosmetics-player-label">CUSTOMIZE — PLAYER 1</div>
                 <input id="player-name-input" placeholder="Enter name..." maxlength="12" autocomplete="off" spellcheck="false">
@@ -750,8 +859,7 @@
                     <button class="swatch" data-color="#2255cc" style="background:#2255cc" title="Cobalt"></button>
                     <button class="swatch" data-color="#00aa44" style="background:#00aa44" title="Emerald"></button>
                     <button class="swatch" data-color="#cc8800" style="background:#cc8800" title="Gold"></button>
-                    <button class="swatch" data-color="#9922cc" style="background:#9922cc" title="Violet"></button>
-                    <button class="swatch" data-color="#999999" style="background:#999999" title="Silver"></button>
+                    <button class="swatch" data-color="#9922cc" style="background:#999999" title="Silver"></button>
                 </div>
                 <button id="cosmetics-done-btn">CONTINUE</button>
             </div>
