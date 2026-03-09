@@ -9,7 +9,7 @@
 
         body {
             overflow: hidden;
-            background: #000;
+            background: #000 url('claudeusetsasthebackround.jpg') center center / cover no-repeat;
             color: #fff;
             font-family: 'Courier New', Courier, monospace;
         }
@@ -356,6 +356,96 @@
 
         .hidden { display: none !important; }
 
+        /* Dealer speech bubble */
+        #dealer-speech {
+            position: fixed;
+            top: 158px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(6, 0, 3, 0.92);
+            border-left: 2px solid #3a0000;
+            border-right: 2px solid #3a0000;
+            padding: 8px 22px;
+            font-size: 0.78em;
+            letter-spacing: 2px;
+            color: #bb7070;
+            font-style: italic;
+            z-index: 22;
+            pointer-events: none;
+            white-space: nowrap;
+            animation: msg-fadein 0.15s ease-out forwards;
+        }
+
+        /* Screen crack at 1 HP */
+        #screen-crack {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 16;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+        #screen-crack:not(.hidden) { opacity: 1; }
+
+        /* Critical HP vignette pulse */
+        #critical-vignette {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 14;
+            opacity: 0;
+            background: radial-gradient(ellipse at center, transparent 38%, rgba(180,0,0,0.55) 100%);
+        }
+        @keyframes critical-pulse { 0%,100% { opacity:0; } 50% { opacity:1; } }
+        #critical-vignette.pulse { animation: critical-pulse 1.05s ease-in-out infinite; }
+
+        /* Round fade */
+        #round-fade {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            z-index: 58;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+        }
+        #round-fade.active { opacity: 1; pointer-events: auto; }
+
+        /* Game over title + subtitle */
+        #game-over-title {
+            font-size: 3.8em;
+            letter-spacing: 12px;
+            text-transform: uppercase;
+            color: #cc0000;
+            margin-bottom: 10px;
+        }
+        #game-over-subtitle {
+            font-size: 0.82em;
+            letter-spacing: 5px;
+            color: #555;
+            margin-bottom: 32px;
+            text-transform: uppercase;
+        }
+
+        /* Item tooltip */
+        .item-btn[title]:hover::after {
+            content: attr(title);
+            position: absolute;
+            bottom: 110%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(4,0,2,0.96);
+            border: 1px solid #4a0000;
+            color: #aaa;
+            font-size: 0.75em;
+            letter-spacing: 2px;
+            padding: 4px 10px;
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 80;
+        }
+        .item-btn { position: relative; }
+
         /* Blood hit overlay */
         #blood-overlay {
             position: fixed;
@@ -383,6 +473,20 @@
     <h1 id="debug-status">JS not started.</h1>
     <div id="scene-container"></div>
     <div id="blood-overlay"></div>
+    <div id="dealer-speech" class="hidden"></div>
+    <div id="screen-crack" class="hidden">
+        <svg width="100%" height="100%" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+            <polyline points="960,60 920,280 840,510 700,690" stroke="white" stroke-width="2.5" fill="none" opacity="0.55"/>
+            <polyline points="920,280 1020,530 1080,770" stroke="white" stroke-width="2" fill="none" opacity="0.45"/>
+            <line x1="960" y1="60" x2="1040" y2="30" stroke="white" stroke-width="1.5" opacity="0.35"/>
+            <line x1="840" y1="510" x2="760" y2="600" stroke="white" stroke-width="1.2" opacity="0.3"/>
+            <line x1="1020" y1="530" x2="940" y2="640" stroke="white" stroke-width="1" opacity="0.25"/>
+            <line x1="700" y1="690" x2="620" y2="810" stroke="white" stroke-width="0.8" opacity="0.2"/>
+            <line x1="1080" y1="770" x2="1120" y2="860" stroke="white" stroke-width="0.7" opacity="0.18"/>
+        </svg>
+    </div>
+    <div id="critical-vignette"></div>
+    <div id="round-fade"></div>
 
     <div id="ui">
         <div class="info-bar">
@@ -424,6 +528,8 @@
     </div>
 
     <div id="game-over-screen" class="hidden">
+        <div id="game-over-title">GAME OVER</div>
+        <div id="game-over-subtitle"></div>
         <button id="restart-btn">Play Again</button>
     </div>
 

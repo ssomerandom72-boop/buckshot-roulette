@@ -12,6 +12,7 @@ let scene, camera, renderer, shotgun, audioCtx;
 let particles = [];
 let dealer, dealerHead;
 let bulbLight, flickerTimer = 0;
+let _ambientNodes = null, _heartbeatInterval = null, _dealerSpeechTimeout = null;
 let offerMesh = null, offerGlow = null, offerMeshBaseY = 0, offerMeshSpawnTime = 0;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -51,6 +52,12 @@ const ui = {
     gameOverScreen: document.getElementById('game-over-screen'),
     restartBtn: document.getElementById('restart-btn'),
     bloodOverlay: document.getElementById('blood-overlay'),
+    dealerSpeech: document.getElementById('dealer-speech'),
+    screenCrack: document.getElementById('screen-crack'),
+    criticalVignette: document.getElementById('critical-vignette'),
+    roundFade: document.getElementById('round-fade'),
+    gameOverTitle: document.getElementById('game-over-title'),
+    gameOverSubtitle: document.getElementById('game-over-subtitle'),
     playerInventory: document.getElementById('player-inventory'),
     itemOffer: document.getElementById('item-offer'),
     offerItemName: document.getElementById('offer-item-name'),
@@ -58,6 +65,71 @@ const ui = {
     offerPickupBtn: document.getElementById('offer-pickup-btn'),
     offerLeaveBtn: document.getElementById('offer-leave-btn'),
 };
+
+// =========== DEALER VOICE LINES ===========
+const DEALER_LINES = {
+    turnStart:   ['...', 'Hmm.', 'Interesting.', "Let's see...", 'The odds favor me.', "I've seen worse. Not many.", 'Your move was predictable.'],
+    hitPlayer:   ['Wonderful.', 'Did that sting?', 'One step closer.', 'Ha.', "You're bleeding.", "Don't worry. It'll be over soon.", 'Next time, duck.'],
+    missPlayer:  ['A blank. How disappointing.', 'Tsk.', 'Not yet.', 'Your luck holds. For now.', 'The chamber mocks us both.'],
+    selfHitLive: ['...A minor setback.', 'This changes nothing.', 'Ugh.', "I've had worse."],
+    selfBlank:   ['As expected.', 'I knew.', 'The gun and I understand each other.', 'Calculated.'],
+    playerWins:  ['...Impressive.', 'Lucky.', "This isn't over.", 'Enjoy it while it lasts.', 'Hmph.'],
+    dealerWins:  ['Too easy.', 'Pathetic.', "Next round won't be kinder.", 'Hmhm.', 'Disappointing.'],
+    useSaw:      ['Double or nothing.', "Let's end this.", 'I do love efficiency.', 'This will hurt.'],
+    useCuffs:    ['Stay still.', 'I insist you cooperate.', "Don't go anywhere.", 'Behave.'],
+    useMag:      ['Knowledge is power.', 'Let me check something.', 'Hmm... I thought so.', 'Ah.'],
+    useBeer:     ['Cheers.', 'Not that one.', 'Eject.', 'Pass.'],
+    useInverter: ['Flip it.', 'Interesting.', 'Now we see.'],
+    useKnife:    ["I believe that was mine.", "You won't need that.", 'Mine now.'],
+};
+const ITEM_ICONS = {
+    cigarettes:'🚬', medication:'💊', magnifying:'🔍', beer:'🍺',
+    handcuffs:'⛓', phone:'📱', saw:'🪚', inverter:'🔁', knife:'🔪', expired_med:'☠',
+};
+const ITEM_DESCRIPTIONS = {
+    cigarettes:'Heal +1 HP', medication:'Heal +1 HP', magnifying:'Peek next shell',
+    beer:'Eject top shell', handcuffs:'Skip dealer turn', phone:"See dealer's HP",
+    saw:'Double next damage', inverter:'Flip next shell', knife:'Steal dealer item', expired_med:'Lose 1 HP',
+};
+function getDealerLine(cat) { const l = DEALER_LINES[cat]||['...']; return l[Math.floor(Math.random()*l.length)]; }
+function showDealerLine(cat, dur = 2200) {
+    const el = ui.dealerSpeech; if (!el) return;
+    el.textContent = `"${getDealerLine(cat)}"`;
+    el.classList.remove('hidden');
+    if (_dealerSpeechTimeout) clearTimeout(_dealerSpeechTimeout);
+    _dealerSpeechTimeout = setTimeout(() => el.classList.add('hidden'), dur);
+}
+function checkCriticalHP() {
+    const crit = state.playerCharges === 1;
+    if (ui.criticalVignette) ui.criticalVignette.classList.toggle('pulse', crit);
+    if (ui.screenCrack) ui.screenCrack.classList.toggle('hidden', !crit);
+    if (crit) sounds.startHeartbeat(); else sounds.stopHeartbeat();
+}
+async function roundTransition() {
+    if (bulbLight) {
+        for (let i = 0; i < 5; i++) {
+            bulbLight.intensity = Math.random() * 2;
+            await new Promise(r => setTimeout(r, 70));
+            bulbLight.intensity = 4;
+            await new Promise(r => setTimeout(r, 55));
+        }
+        bulbLight.intensity = 0;
+    }
+    const fade = ui.roundFade;
+    if (fade) { fade.classList.add('active'); }
+    await new Promise(r => setTimeout(r, 700));
+    if (fade) fade.classList.remove('active');
+    if (bulbLight) {
+        for (let i = 0; i < 3; i++) {
+            bulbLight.intensity = Math.random() * 4;
+            await new Promise(r => setTimeout(r, 90));
+            bulbLight.intensity = 0;
+            await new Promise(r => setTimeout(r, 70));
+        }
+        bulbLight.intensity = 9.0;
+    }
+    sounds.playRoundStart();
+}
 
 // =========== ITEM SYSTEM ===========
 const ITEM_NAMES = {
@@ -683,6 +755,7 @@ async function applyDealerItem(itemType) {
 
         case 'saw':
             state.sawActive = true;
+            showDealerLine('useSaw');
             await showMessage('Dealer uses SAW!', 1600);
             break;
 
@@ -696,8 +769,8 @@ async function applyDealerItem(itemType) {
                     state.liveRounds--;
                     state.blankRounds++;
                 }
-                // Update dealer's knowledge
                 state.dealerNextShellIsLive = state.chamber.length > 0 ? state.chamber[0] : false;
+                showDealerLine('useInverter');
                 await showMessage('Dealer uses INVERTER.', 1600);
             }
             break;
@@ -708,6 +781,7 @@ async function applyDealerItem(itemType) {
                 const rIdx = Math.floor(Math.random() * state.playerInventory.length);
                 const stolen = state.playerInventory.splice(rIdx, 1)[0];
                 updateUI();
+                showDealerLine('useKnife');
                 await showMessage(`Dealer uses KNIFE. Your ${ITEM_NAMES[stolen]} is gone!`, 2000);
             } else {
                 await showMessage('Dealer uses KNIFE. You had nothing.', 1600);
@@ -718,6 +792,7 @@ async function applyDealerItem(itemType) {
         case 'magnifying': {
             state.dealerKnowsNextShell = true;
             state.dealerNextShellIsLive = state.chamber.length > 0 ? state.chamber[0] : false;
+            showDealerLine('useMag');
             await showMessage('Dealer uses MAGNIFYING GLASS.', 1600);
             break;
         }
@@ -733,7 +808,7 @@ function init() {
     debug.textContent = 'init() called.';
 
     // Renderer
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setClearColor(0x000000, 0);
     renderer.shadowMap.enabled = true;
@@ -742,9 +817,7 @@ function init() {
 
     // Scene & Camera
     scene = new THREE.Scene();
-    new THREE.TextureLoader().load('claudeusetsasthebackround.jpg', (tex) => {
-        scene.background = tex;
-    });
+
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
     camera.position.set(0, 1.8, 2);
     camera.lookAt(0, 1, 0);
@@ -788,43 +861,12 @@ function init() {
 
     debug.textContent = 'Lighting created.';
 
-    // Room
-    const floorMat    = new THREE.MeshStandardMaterial({ color: 0x1c1008, roughness: 1.0 });
-    const wallTopMat  = new THREE.MeshStandardMaterial({ color: 0x1f0a0a, roughness: 1.0 });
-    const wallBaseMat = new THREE.MeshStandardMaterial({ color: 0x120505, roughness: 1.0 });
-    const ceilMat     = new THREE.MeshStandardMaterial({ color: 0x100808, roughness: 1.0 });
-
+    // Floor only (walls replaced by background image)
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x1c1008, roughness: 1.0 });
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     scene.add(floor);
-
-    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), ceilMat);
-    ceiling.rotation.x = Math.PI / 2;
-    ceiling.position.y = 4;
-    scene.add(ceiling);
-
-    // Each wall has an upper panel and a darker wainscoting base
-    function makeWall(rotY, px, pz) {
-        const upper = new THREE.Mesh(new THREE.PlaneGeometry(8, 2.8), wallTopMat);
-        upper.rotation.y = rotY;
-        upper.position.set(px, 2.6, pz);
-        scene.add(upper);
-        const base = new THREE.Mesh(new THREE.PlaneGeometry(8, 1.2), wallBaseMat);
-        base.rotation.y = rotY;
-        base.position.set(px, 0.6, pz);
-        scene.add(base);
-        // Chair rail strip between panels
-        const rail = new THREE.Mesh(new THREE.PlaneGeometry(8, 0.06),
-            new THREE.MeshStandardMaterial({ color: 0x3a1010, roughness: 0.7 }));
-        rail.rotation.y = rotY;
-        rail.position.set(px, 1.22, pz);
-        scene.add(rail);
-    }
-
-    makeWall(0,           0,  -4);   // back wall
-    makeWall(Math.PI / 2, -4,  0);   // left wall
-    makeWall(-Math.PI / 2, 4,  0);   // right wall
 
     // Models
     const table = new TableModel(scene);
@@ -872,12 +914,14 @@ async function runState() {
         // Player died → dealer wins this round
         if (state.playerCharges <= 0) {
             state.dealerRoundWins++;
+            showDealerLine('dealerWins', 3000);
             if (state.dealerRoundWins >= 2) {
                 await showMessage('DEALER WINS', 3500);
-                showGameOver();
+                showGameOver(false);
                 return;
             }
             await showMessage(`DEALER WINS ROUND ${state.round}`, 2500);
+            await roundTransition();
             state.round++;
             state.playerCharges = ROUND_MAX_CHARGES;
             state.dealerCharges = ROUND_MAX_CHARGES;
@@ -889,6 +933,7 @@ async function runState() {
             state.playerCuffed    = false;
             state.dealerKnowsNextShell = false;
             state.chamber = [];
+            sounds.stopHeartbeat(); checkCriticalHP();
             updateUI();
             await showMessage(`ROUND ${state.round}`, 2500);
         }
@@ -896,13 +941,15 @@ async function runState() {
         // Dealer died → player wins this round
         if (state.dealerCharges <= 0) {
             state.playerRoundWins++;
+            showDealerLine('playerWins', 3000);
             await dealer.deathFall();
             if (state.playerRoundWins >= 2) {
                 await showMessage('YOU WIN', 5000);
-                showGameOver();
+                showGameOver(true);
                 return;
             }
             await showMessage(`YOU WIN ROUND ${state.round}`, 2500);
+            await roundTransition();
             state.round++;
             state.playerCharges = ROUND_MAX_CHARGES;
             state.dealerCharges = ROUND_MAX_CHARGES;
@@ -914,6 +961,7 @@ async function runState() {
             state.playerCuffed    = false;
             state.dealerKnowsNextShell = false;
             state.chamber = [];
+            sounds.stopHeartbeat(); checkCriticalHP();
             dealer.resetPose();
             updateUI();
             await showMessage(`ROUND ${state.round}`, 2500);
@@ -943,11 +991,24 @@ async function runState() {
     }
 }
 
-function showGameOver() {
+function showGameOver(playerWon = false) {
+    sounds.stopHeartbeat();
+    if (ui.gameOverTitle) {
+        ui.gameOverTitle.textContent = playerWon ? 'YOU WIN' : 'GAME OVER';
+        ui.gameOverTitle.style.color = playerWon ? '#00cc55' : '#cc0000';
+        ui.gameOverTitle.style.textShadow = playerWon
+            ? '0 0 40px rgba(0,200,80,0.9), 0 0 80px rgba(0,100,40,0.5)'
+            : '0 0 40px rgba(200,0,0,0.9), 0 0 80px rgba(100,0,0,0.5)';
+    }
+    if (ui.gameOverSubtitle) {
+        const winLines  = ['The dealer has been defeated.', 'Against all odds.', 'Lucky bastard.'];
+        const loseLines = ['The house always wins.', 'Did you really think you had a chance?', 'Better luck next time.'];
+        const pool = playerWon ? winLines : loseLines;
+        ui.gameOverSubtitle.textContent = pool[Math.floor(Math.random() * pool.length)];
+    }
+    if (!playerWon) sounds.playLaugh();
     ui.gameOverScreen.classList.remove('hidden');
-    ui.restartBtn.addEventListener('click', () => {
-        window.location.reload();
-    }, { once: true });
+    ui.restartBtn.addEventListener('click', () => { window.location.reload(); }, { once: true });
 }
 
 async function handlePlayerChoice(isShootingDealer) {
@@ -1003,6 +1064,7 @@ async function handlePlayerChoice(isShootingDealer) {
             flashBloodScreen();
             await showMessage(hitMsg);
             createBloodSplatter(targetPos);
+            checkCriticalHP();
             state.isPlayerTurn = false;
         } else {
             await showMessage("Click. Blank. Your turn again.");
@@ -1021,6 +1083,7 @@ async function handlePlayerChoice(isShootingDealer) {
 }
 
 async function dealerTurn() {
+    showDealerLine('turnStart', 2000);
     await showMessage("Dealer's turn.", 1500);
 
     // Handle dealer cuffed
@@ -1090,10 +1153,13 @@ async function dealerTurn() {
         if (wasLive) {
             state.playerCharges = Math.max(0, state.playerCharges - damage);
             const hitMsg = damage > 1 ? `BANG. You've been hit for ${damage} damage!` : "BANG. You've been hit.";
+            showDealerLine('hitPlayer');
             flashBloodScreen();
             await showMessage(hitMsg);
             createBloodSplatter(targetPos);
+            checkCriticalHP();
         } else {
+            showDealerLine('missPlayer');
             await showMessage("Click. Dealer shot a blank.");
         }
         state.isPlayerTurn = true;
@@ -1102,9 +1168,11 @@ async function dealerTurn() {
             state.dealerCharges = Math.max(0, state.dealerCharges - damage);
             createBloodSplatter(targetPos);
             const hitMsg = damage > 1 ? `BANG. Dealer shot himself for ${damage} damage!` : 'BANG. Dealer shot himself.';
+            showDealerLine('selfHitLive');
             await Promise.all([dealer.fallBack(), showMessage(hitMsg)]);
             state.isPlayerTurn = true;
         } else {
+            showDealerLine('selfBlank');
             await showMessage("Click. Dealer shot a blank. His turn again.");
             state.isPlayerTurn = false;
         }
@@ -1173,7 +1241,8 @@ function updateUI(showShells = false) {
     for (const item of state.playerInventory) {
         const btn = document.createElement('button');
         btn.className = 'item-btn';
-        btn.textContent = ITEM_NAMES[item] || item;
+        btn.textContent = `${ITEM_ICONS[item] || ''} ${ITEM_NAMES[item] || item}`;
+        btn.title = ITEM_DESCRIPTIONS[item] || '';
         btn.addEventListener('click', async () => {
             if (state.isAnimating) return;
             // Prevent clicks during item use by setting animating flag briefly
@@ -1293,9 +1362,15 @@ function createMuzzleFlash() {
     flashBloom.position.copy(barrelEnd);
     scene.add(flashBloom);
 
+    // Brief light that illuminates the dealer's face
+    const dealerFaceFlash = new THREE.PointLight(0xffaa44, 14, 4.0);
+    dealerFaceFlash.position.set(0, 1.9, -0.7);
+    scene.add(dealerFaceFlash);
+
     setTimeout(() => {
         scene.remove(flashCore);
         scene.remove(flashBloom);
+        scene.remove(dealerFaceFlash);
         spawnMuzzleSmoke();
     }, 140);
 }
@@ -1629,9 +1704,65 @@ const sounds = {
     },
 };
 
+// Extended sounds
+sounds.playAmbient = () => {
+    if (!audioCtx || _ambientNodes) return;
+    const osc1 = audioCtx.createOscillator(), osc2 = audioCtx.createOscillator();
+    osc1.type = 'sawtooth'; osc1.frequency.value = 55;
+    osc2.type = 'sine';     osc2.frequency.value = 82;
+    const filt = audioCtx.createBiquadFilter();
+    filt.type = 'lowpass'; filt.frequency.value = 170; filt.Q.value = 1.5;
+    const master = audioCtx.createGain(); master.gain.value = 0.06;
+    const lfo = audioCtx.createOscillator(), lfoG = audioCtx.createGain();
+    lfo.type = 'sine'; lfo.frequency.value = 0.22; lfoG.gain.value = 0.022;
+    lfo.connect(lfoG); lfoG.connect(master.gain);
+    osc1.connect(filt); osc2.connect(filt); filt.connect(master); master.connect(audioCtx.destination);
+    osc1.start(); osc2.start(); lfo.start();
+    _ambientNodes = { osc1, osc2, lfo };
+};
+sounds.startHeartbeat = () => {
+    if (!audioCtx || _heartbeatInterval) return;
+    const beat = () => {
+        if (!audioCtx) return;
+        const t = audioCtx.currentTime;
+        [[62, 0.65, 0, 0.14], [50, 0.42, 0.2, 0.12]].forEach(([freq, vol, d, dur]) => {
+            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+            o.type = 'sine';
+            o.frequency.setValueAtTime(freq, t+d);
+            o.frequency.exponentialRampToValueAtTime(freq*0.5, t+d+dur);
+            g.gain.setValueAtTime(vol, t+d); g.gain.exponentialRampToValueAtTime(0.001, t+d+dur);
+            o.connect(g).connect(audioCtx.destination); o.start(t+d); o.stop(t+d+dur+0.01);
+        });
+    };
+    beat(); _heartbeatInterval = setInterval(beat, 950);
+};
+sounds.stopHeartbeat = () => { if (_heartbeatInterval) { clearInterval(_heartbeatInterval); _heartbeatInterval = null; } };
+sounds.playLaugh = () => {
+    if (!audioCtx) return;
+    [380, 345, 305, 272, 252, 242].forEach((freq, i) => {
+        const t = audioCtx.currentTime + i * 0.13;
+        const o = audioCtx.createOscillator(), bp = audioCtx.createBiquadFilter(), g = audioCtx.createGain();
+        o.type = 'sawtooth'; o.frequency.setValueAtTime(freq, t); o.frequency.exponentialRampToValueAtTime(freq*0.65, t+0.11);
+        bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 1.5;
+        g.gain.setValueAtTime(0.28, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.14);
+        o.connect(bp).connect(g).connect(audioCtx.destination); o.start(t); o.stop(t+0.16);
+    });
+};
+sounds.playRoundStart = () => {
+    if (!audioCtx) return;
+    [[220,0],[330,0.22],[440,0.44]].forEach(([freq, d]) => {
+        const t = audioCtx.currentTime + d;
+        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.type = 'sine'; o.frequency.value = freq;
+        g.gain.setValueAtTime(0.28, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.4);
+        o.connect(g).connect(audioCtx.destination); o.start(t); o.stop(t+0.4);
+    });
+};
+
 function initAudio() {
     if (!audioCtx) {
         audioCtx = new window.AudioContext();
+        sounds.playAmbient();
     }
 }
 
