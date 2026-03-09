@@ -498,6 +498,113 @@
             z-index: 62;
             pointer-events: auto;
         }
+
+        /* ── LOBBY SCREEN ── */
+        #lobby-screen {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.93);
+            z-index: 100;
+            pointer-events: auto;
+        }
+        #lobby-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 18px;
+            text-align: center;
+        }
+        #lobby-title {
+            font-size: 3em;
+            letter-spacing: 10px;
+            color: #cc0000;
+            text-shadow: 0 0 40px rgba(200,0,0,0.8), 0 0 80px rgba(120,0,0,0.5);
+            text-transform: uppercase;
+        }
+        #lobby-subtitle {
+            font-size: 0.6em;
+            letter-spacing: 8px;
+            color: #3a0000;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        #lobby-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            width: 260px;
+        }
+        #online-setup {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            align-items: center;
+            width: 280px;
+        }
+        #online-options {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            align-items: center;
+            width: 100%;
+        }
+        #join-row {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+            justify-content: center;
+        }
+        #join-code-input {
+            background: rgba(6,0,3,0.92);
+            border: 1px solid #8b0000;
+            color: #fff;
+            padding: 14px 12px;
+            font-size: 1.1em;
+            letter-spacing: 6px;
+            font-family: inherit;
+            text-transform: uppercase;
+            width: 160px;
+            text-align: center;
+            outline: none;
+            box-shadow: 0 0 8px rgba(139,0,0,0.35);
+        }
+        #join-code-input::placeholder { color: #3a0000; letter-spacing: 3px; }
+        #room-code-display { text-align: center; }
+        #room-code-label {
+            font-size: 0.52em;
+            letter-spacing: 6px;
+            color: #4a0000;
+            text-transform: uppercase;
+        }
+        #room-code-text {
+            font-size: 2.8em;
+            letter-spacing: 14px;
+            color: #cc0000;
+            text-shadow: 0 0 20px rgba(200,0,0,0.7);
+            margin: 10px 0 6px;
+        }
+        #lobby-status {
+            font-size: 0.55em;
+            letter-spacing: 4px;
+            color: #3a3a3a;
+            text-transform: uppercase;
+            animation: vignette-pulse 2s ease-in-out infinite;
+        }
+        #online-status {
+            position: fixed;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.48em;
+            letter-spacing: 4px;
+            color: #00aa44;
+            z-index: 30;
+            pointer-events: none;
+            text-shadow: 0 0 8px rgba(0,180,60,0.6);
+        }
     </style>
 </head>
 <body>
@@ -570,6 +677,57 @@
         <button id="restart-btn">Play Again</button>
     </div>
 
+    <!-- Lobby screen -->
+    <div id="lobby-screen">
+        <div id="lobby-content">
+            <div id="lobby-title">BUCKSHOT ROULETTE</div>
+            <div id="lobby-subtitle">SELECT MODE</div>
+            <div id="lobby-buttons">
+                <button id="mode-ai">VS AI</button>
+                <button id="mode-local">LOCAL 2P</button>
+                <button id="mode-online">ONLINE 2P</button>
+            </div>
+            <div id="online-setup" class="hidden">
+                <div id="online-options">
+                    <button id="create-room-btn">Create Room</button>
+                    <div id="join-row">
+                        <input id="join-code-input" placeholder="ROOM CODE" maxlength="6" autocomplete="off" spellcheck="false">
+                        <button id="join-room-btn">Join</button>
+                    </div>
+                </div>
+                <div id="room-code-display" class="hidden">
+                    <div id="room-code-label">ROOM CODE</div>
+                    <div id="room-code-text">------</div>
+                    <div id="lobby-status">Waiting for opponent...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Player 2 turn UI (local 2P mode) -->
+    <div id="player2-actions" class="actions hidden">
+        <div id="player2-turn-label" style="font-size:0.6em;letter-spacing:5px;color:#880000;text-transform:uppercase;margin-bottom:8px">Player 2's Turn</div>
+        <div id="player2-inventory"></div>
+        <div class="action-row">
+            <button id="p2-shoot-p1">Shoot Player 1</button>
+            <button id="p2-shoot-self">Shoot Self</button>
+        </div>
+    </div>
+
+    <!-- Guest action UI (online mode, guest's turn) -->
+    <div id="guest-actions" class="actions hidden">
+        <div style="font-size:0.6em;letter-spacing:5px;color:#880000;text-transform:uppercase;margin-bottom:8px">Your Turn (Player 2)</div>
+        <div id="guest-inventory"></div>
+        <div class="action-row">
+            <button id="g-shoot-host">Shoot Player 1</button>
+            <button id="g-shoot-self">Shoot Self</button>
+        </div>
+    </div>
+
+    <!-- Online connection status indicator -->
+    <div id="online-status" class="hidden">● CONNECTED</div>
+
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script type="importmap">
         { "imports": { "three": "https://unpkg.com/three@0.162.0/build/three.module.js" } }
     </script>

@@ -18,6 +18,8 @@ const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 const shotgunInitialPos = new THREE.Vector3(0, 1.25, 0.4);
 const ROUND_MAX_CHARGES = 3; // Same HP every round (best 2 of 3)
+let gameMode = 'ai'; // 'ai' | 'local' | 'online'
+const online = { peer: null, conn: null, isHost: false, roomCode: '', _actionResolve: null };
 
 const state = {
     round: 1,
@@ -813,6 +815,400 @@ async function applyDealerItem(itemType) {
     updateUI();
 }
 
+// =========== MULTIPLAYER ===========
+
+function generateRoomCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
+function sendToGuest(data) {
+    if (online.conn && online.conn.open) online.conn.send(data);
+}
+function sendToHost(data) {
+    if (online.conn && online.conn.open) online.conn.send(data);
+}
+
+function makeChargesHTML(charges, max) {
+    let html = '';
+    for (let i = 0; i < charges; i++) html += '<span class="charge-live">&#9679;</span> ';
+    for (let i = 0; i < max - charges; i++) html += '<span class="charge-dead">&#9675;</span> ';
+    return html.trim();
+}
+
+function sendStateToGuest() {
+    if (!online.isHost) return;
+    sendToGuest({
+        type: 'gameState',
+        playerCharges: state.playerCharges,
+        dealerCharges: state.dealerCharges,
+        playerRoundWins: state.playerRoundWins,
+        dealerRoundWins: state.dealerRoundWins,
+        round: state.round,
+        liveRounds: state.liveRounds,
+        blankRounds: state.blankRounds,
+        chamberLength: state.chamber.length,
+        guestInventory: state.dealerInventory,
+        hostInventory: state.playerInventory,
+        sawActive: state.sawActive,
+        dealerCuffed: state.dealerCuffed,
+        playerCuffed: state.playerCuffed,
+        isPlayerTurn: state.isPlayerTurn,
+    });
+}
+
+function applyGuestState(data) {
+    // Guest perspective: "You" = Player 2 = dealerCharges
+    state.playerCharges = data.playerCharges;
+    state.dealerCharges = data.dealerCharges;
+    state.playerRoundWins = data.playerRoundWins;
+    state.dealerRoundWins = data.dealerRoundWins;
+    state.round = data.round;
+    state.liveRounds = data.liveRounds;
+    state.blankRounds = data.blankRounds;
+    state.dealerInventory = data.guestInventory;
+    state.playerInventory = data.hostInventory;
+    state.sawActive = data.sawActive;
+    state.dealerCuffed = data.dealerCuffed;
+    state.playerCuffed = data.playerCuffed;
+    state.isPlayerTurn = data.isPlayerTurn;
+
+    // Render from guest's POV (swap player/dealer for display)
+    const pWins = '★'.repeat(data.dealerRoundWins) + '☆'.repeat(2 - data.dealerRoundWins);
+    const dWins = '★'.repeat(data.playerRoundWins) + '☆'.repeat(2 - data.playerRoundWins);
+    ui.roundDisplay.textContent = `Round ${data.round}  |  You ${pWins} vs ${dWins} Opponent`;
+    ui.playerCharges.innerHTML = makeChargesHTML(data.dealerCharges, ROUND_MAX_CHARGES);
+    ui.dealerCharges.innerHTML = makeChargesHTML(data.playerCharges, ROUND_MAX_CHARGES);
+    if (data.chamberLength > 0 && data.liveRounds !== undefined) {
+        ui.shellInfo.innerHTML = `Loaded: <span style="color:#f55">${data.liveRounds} LIVE</span>, <span style="color:#5bf">${data.blankRounds} BLANK</span>`;
+    }
+}
+
+function handleGuestMessage(data) {
+    if (data.type === 'action' && online._actionResolve) {
+        online._actionResolve(data);
+        online._actionResolve = null;
+    }
+}
+
+function handleHostMessage(data) {
+    switch (data.type) {
+        case 'gameState':
+            applyGuestState(data);
+            break;
+        case 'message':
+            showMessage(data.text, data.duration || 2000);
+            break;
+        case 'yourTurn':
+            state.dealerInventory = data.guestInventory || [];
+            showGuestTurnUI();
+            break;
+        case 'gameOver':
+            showGameOver(data.guestWon);
+            break;
+        case 'dealerLine':
+            showDealerLine(data.cat, data.dur);
+            break;
+    }
+}
+
+function showGuestTurnUI() {
+    const el = document.getElementById('guest-actions');
+    el.classList.remove('hidden');
+
+    const invEl = document.getElementById('guest-inventory');
+    invEl.innerHTML = '';
+    for (const item of state.dealerInventory) {
+        const btn = document.createElement('button');
+        btn.className = 'item-btn';
+        btn.textContent = `${ITEM_ICONS[item] || ''} ${ITEM_NAMES[item] || item}`;
+        btn.title = ITEM_DESCRIPTIONS[item] || '';
+        btn.addEventListener('click', () => {
+            el.classList.add('hidden');
+            sendToHost({ type: 'action', shootTarget: 'item', useItem: item });
+        }, { once: true });
+        invEl.appendChild(btn);
+    }
+
+    document.getElementById('g-shoot-host').onclick = () => {
+        el.classList.add('hidden');
+        sendToHost({ type: 'action', shootTarget: 'player', useItem: null });
+    };
+    document.getElementById('g-shoot-self').onclick = () => {
+        el.classList.add('hidden');
+        sendToHost({ type: 'action', shootTarget: 'self', useItem: null });
+    };
+}
+
+async function waitForGuestAction() {
+    while (true) {
+        sendToGuest({ type: 'yourTurn', guestInventory: state.dealerInventory });
+        const action = await new Promise(resolve => { online._actionResolve = resolve; });
+
+        if (action.shootTarget === 'item' && action.useItem) {
+            // Guest used an item — apply it and loop back
+            const idx = state.dealerInventory.indexOf(action.useItem);
+            if (idx !== -1) {
+                state.dealerInventory.splice(idx, 1);
+                await applyDealerItem(action.useItem);
+                sendStateToGuest();
+            }
+        } else {
+            // Guest chose to shoot
+            await processGuestShot(action.shootTarget === 'player');
+            return;
+        }
+    }
+}
+
+async function processGuestShot(shootPlayer) {
+    const targetPos = shootPlayer ? new THREE.Vector3(0, 1.5, 0.6) : new THREE.Vector3(0, 1.5, -0.6);
+    const targetRot = shootPlayer
+        ? new THREE.Euler(-0.3, -Math.PI / 2, 0)
+        : new THREE.Euler(0, Math.PI / 2, 0);
+
+    const grabPos = new THREE.Vector3(0.18, 1.3, -0.15);
+    await Promise.all([dealer.reachOut(), animateShotgun(grabPos, new THREE.Euler(0, Math.PI / 2, 0))]);
+    await new Promise(r => setTimeout(r, 250));
+    await animateShotgun(targetPos, targetRot);
+
+    const wasLive = fireShell();
+    if (wasLive) {
+        sounds.playShot(); createMuzzleFlash(); ejectShell(true);
+        await triggerShotEffects();
+    } else {
+        sounds.playClick(); ejectShell(false);
+    }
+
+    const damage = (wasLive && state.sawActive) ? 2 : 1;
+    state.sawActive = false;
+
+    if (shootPlayer) {
+        if (wasLive) {
+            state.playerCharges = Math.max(0, state.playerCharges - damage);
+            state.stats.damageTaken += damage;
+            const msg = damage > 1 ? `BANG. You've been hit for ${damage}!` : "BANG. You've been hit.";
+            flashBloodScreen();
+            await showMessage(msg);
+            createBloodSplatter(targetPos);
+            checkCriticalHP();
+        } else {
+            await showMessage("Click. Blank.");
+        }
+        state.isPlayerTurn = true;
+    } else {
+        if (wasLive) {
+            state.dealerCharges = Math.max(0, state.dealerCharges - damage);
+            createBloodSplatter(targetPos);
+            const msg = damage > 1 ? `BANG. Player 2 shot themselves for ${damage}!` : 'BANG. Player 2 shot themselves.';
+            await Promise.all([dealer.fallBack(), showMessage(msg)]);
+            state.isPlayerTurn = true;
+        } else {
+            await showMessage("Click. Blank. Player 2's turn again.");
+            state.isPlayerTurn = false;
+        }
+    }
+
+    await Promise.all([
+        animateShotgun(shotgunInitialPos, new THREE.Euler(0, -Math.PI / 2, 0)),
+        dealer.retractArm(),
+    ]);
+    updateUI();
+    sendStateToGuest();
+    trySpawnItem(false);
+}
+
+// ── LOCAL 2P ──
+
+function updateP2UI() {
+    const invEl = document.getElementById('player2-inventory');
+    invEl.innerHTML = '';
+    for (const item of state.dealerInventory) {
+        const btn = document.createElement('button');
+        btn.className = 'item-btn';
+        btn.textContent = `${ITEM_ICONS[item] || ''} ${ITEM_NAMES[item] || item}`;
+        btn.title = ITEM_DESCRIPTIONS[item] || '';
+        btn.addEventListener('click', async () => {
+            if (state.isAnimating) return;
+            state.isAnimating = true;
+            document.getElementById('player2-actions').classList.add('hidden');
+            const idx = state.dealerInventory.indexOf(item);
+            if (idx !== -1) state.dealerInventory.splice(idx, 1);
+            await applyDealerItem(item);
+            if (state.playerCharges <= 0 || state.dealerCharges <= 0 || state.chamber.length === 0) {
+                state.isAnimating = false;
+                runState();
+                return;
+            }
+            state.isAnimating = false;
+            updateP2UI();
+            document.getElementById('player2-actions').classList.remove('hidden');
+        });
+        invEl.appendChild(btn);
+    }
+}
+
+async function player2Turn() {
+    if (state.dealerCuffed) {
+        state.dealerCuffed = false;
+        await showMessage("Player 2 is cuffed! Skipping turn.", 2200);
+        state.isPlayerTurn = true;
+        updateUI();
+        runState();
+        return;
+    }
+
+    updateP2UI();
+    document.getElementById('player2-actions').classList.remove('hidden');
+    state.isAnimating = false;
+}
+
+async function handlePlayer2Choice(shootPlayer) {
+    if (state.isAnimating) return;
+    initAudio();
+    state.isAnimating = true;
+    document.getElementById('player2-actions').classList.add('hidden');
+
+    const targetPos = shootPlayer ? new THREE.Vector3(0, 1.5, 0.6) : new THREE.Vector3(0, 1.5, -0.6);
+    const targetRot = shootPlayer
+        ? new THREE.Euler(-0.3, -Math.PI / 2, 0)
+        : new THREE.Euler(0, Math.PI / 2, 0);
+
+    const grabPos = new THREE.Vector3(0.18, 1.3, -0.15);
+    await Promise.all([dealer.reachOut(), animateShotgun(grabPos, new THREE.Euler(0, Math.PI / 2, 0))]);
+    await new Promise(r => setTimeout(r, 250));
+    await animateShotgun(targetPos, targetRot);
+
+    const wasLive = fireShell();
+    if (wasLive) {
+        sounds.playShot(); createMuzzleFlash(); ejectShell(true);
+        await triggerShotEffects();
+    } else {
+        sounds.playClick(); ejectShell(false);
+    }
+
+    const damage = (wasLive && state.sawActive) ? 2 : 1;
+    state.sawActive = false;
+
+    if (shootPlayer) {
+        if (wasLive) {
+            state.playerCharges = Math.max(0, state.playerCharges - damage);
+            state.stats.damageTaken += damage;
+            const msg = damage > 1 ? `BANG. Player 1 hit for ${damage}!` : 'BANG. Player 1 hit.';
+            flashBloodScreen();
+            await showMessage(msg);
+            createBloodSplatter(targetPos);
+            checkCriticalHP();
+        } else {
+            await showMessage("Click. Blank.");
+        }
+        state.isPlayerTurn = true;
+    } else {
+        if (wasLive) {
+            state.dealerCharges = Math.max(0, state.dealerCharges - damage);
+            createBloodSplatter(targetPos);
+            const msg = damage > 1 ? `BANG. Player 2 shot themselves for ${damage}!` : 'BANG. Player 2 shot themselves.';
+            await Promise.all([dealer.fallBack(), showMessage(msg)]);
+            state.isPlayerTurn = true;
+        } else {
+            await showMessage("Click. Blank. Player 2's turn again.");
+            state.isPlayerTurn = false;
+        }
+    }
+
+    await Promise.all([
+        animateShotgun(shotgunInitialPos, new THREE.Euler(0, -Math.PI / 2, 0)),
+        dealer.retractArm(),
+    ]);
+    updateUI();
+    state.isAnimating = false;
+    trySpawnItem(false);
+    runState();
+}
+
+// ── LOBBY ──
+
+function showLobby() {
+    return new Promise(resolve => {
+        const lobby = document.getElementById('lobby-screen');
+
+        document.getElementById('mode-ai').addEventListener('click', () => {
+            lobby.classList.add('hidden');
+            resolve('ai');
+        });
+
+        document.getElementById('mode-local').addEventListener('click', () => {
+            lobby.classList.add('hidden');
+            resolve('local');
+        });
+
+        document.getElementById('mode-online').addEventListener('click', () => {
+            document.getElementById('lobby-buttons').classList.add('hidden');
+            document.getElementById('online-setup').classList.remove('hidden');
+        });
+
+        document.getElementById('create-room-btn').addEventListener('click', () => {
+            const code = generateRoomCode();
+            online.roomCode = code;
+            online.isHost = true;
+            document.getElementById('online-options').classList.add('hidden');
+            document.getElementById('room-code-display').classList.remove('hidden');
+            document.getElementById('room-code-text').textContent = code;
+            document.getElementById('lobby-status').textContent = 'Waiting for opponent...';
+
+            const peer = new Peer(code);
+            online.peer = peer;
+            peer.on('connection', conn => {
+                online.conn = conn;
+                conn.on('open', () => {
+                    document.getElementById('lobby-status').textContent = 'Opponent connected!';
+                    conn.on('data', data => handleGuestMessage(data));
+                    setTimeout(() => {
+                        lobby.classList.add('hidden');
+                        resolve('online');
+                    }, 1200);
+                });
+            });
+            peer.on('error', err => {
+                document.getElementById('lobby-status').textContent = 'Error: ' + err.type + '. Try again.';
+            });
+        });
+
+        document.getElementById('join-room-btn').addEventListener('click', () => {
+            const code = document.getElementById('join-code-input').value.trim().toUpperCase();
+            if (!code || code.length < 4) return;
+            online.isHost = false;
+            online.roomCode = code;
+            document.getElementById('lobby-status') && (document.getElementById('lobby-status').textContent = 'Connecting...');
+            document.getElementById('online-options').classList.add('hidden');
+            document.getElementById('room-code-display').classList.remove('hidden');
+            document.getElementById('room-code-text').textContent = code;
+            document.getElementById('lobby-status').textContent = 'Connecting...';
+
+            const peer = new Peer();
+            online.peer = peer;
+            peer.on('open', () => {
+                const conn = peer.connect(code, { reliable: true });
+                online.conn = conn;
+                conn.on('open', () => {
+                    document.getElementById('lobby-status').textContent = 'Connected!';
+                    conn.on('data', data => handleHostMessage(data));
+                    setTimeout(() => {
+                        lobby.classList.add('hidden');
+                        resolve('online');
+                    }, 800);
+                });
+                conn.on('error', err => {
+                    document.getElementById('lobby-status').textContent = 'Connection failed. Check code.';
+                });
+            });
+            peer.on('error', err => {
+                document.getElementById('lobby-status').textContent = 'Error: ' + err.type;
+            });
+        });
+    });
+}
+
 let isPaused = false;
 function togglePause() {
     if (ui.gameOverScreen && !ui.gameOverScreen.classList.contains('hidden')) return;
@@ -933,6 +1329,8 @@ function init() {
     // Listeners
     ui.shootDealerBtn.addEventListener('click', () => handlePlayerChoice(true));
     ui.shootSelfBtn.addEventListener('click', () => handlePlayerChoice(false));
+    document.getElementById('p2-shoot-p1').addEventListener('click', () => handlePlayer2Choice(true));
+    document.getElementById('p2-shoot-self').addEventListener('click', () => handlePlayer2Choice(false));
     renderer.domElement.addEventListener('click', (e) => {
         if (!offerMesh) return;
         mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
@@ -962,7 +1360,31 @@ function init() {
     animate();
     document.getElementById('resume-btn').addEventListener('click', togglePause);
     debug.textContent = 'Game loop started. Initialization complete.';
-    (async () => { await playIntro(); runState(); })();
+    (async () => {
+        gameMode = await showLobby();
+
+        // Update health bar labels for multiplayer
+        if (gameMode !== 'ai') {
+            const dealerLabel = document.querySelector('#dealer-charges').previousElementSibling;
+            const playerLabel = document.querySelector('#player-charges').previousElementSibling;
+            if (dealerLabel) dealerLabel.textContent = 'PLAYER 2';
+            if (playerLabel) playerLabel.textContent = 'PLAYER 1';
+        }
+
+        // Show online status badge
+        if (gameMode === 'online') {
+            document.getElementById('online-status').classList.remove('hidden');
+        }
+
+        if (gameMode === 'online' && !online.isHost) {
+            // Guest: just wait for host messages; show a holding message
+            await showMessage('Connected! Waiting for host...', 2500);
+            return; // Guest never runs runState(); host drives everything
+        }
+
+        await playIntro();
+        runState();
+    })();
 }
 
 // =========== CORE GAME STATE MACHINE ===========
@@ -973,13 +1395,15 @@ async function runState() {
         // Player died → dealer wins this round
         if (state.playerCharges <= 0) {
             state.dealerRoundWins++;
-            showDealerLine('dealerWins', 3000);
+            const p2Name = gameMode === 'ai' ? 'DEALER' : 'PLAYER 2';
+            if (gameMode === 'ai') showDealerLine('dealerWins', 3000);
             if (state.dealerRoundWins >= 2) {
-                await showMessage('DEALER WINS', 3500);
+                await showMessage(`${p2Name} WINS`, 3500);
+                if (gameMode === 'online' && online.isHost) sendToGuest({ type: 'gameOver', guestWon: true });
                 showGameOver(false);
                 return;
             }
-            await showMessage(`DEALER WINS ROUND ${state.round}`, 2500);
+            await showMessage(`${p2Name} WINS ROUND ${state.round}`, 2500);
             await roundTransition();
             state.round++;
             state.playerCharges = ROUND_MAX_CHARGES;
@@ -1000,14 +1424,17 @@ async function runState() {
         // Dealer died → player wins this round
         if (state.dealerCharges <= 0) {
             state.playerRoundWins++;
-            showDealerLine('playerWins', 3000);
+            if (gameMode === 'ai') showDealerLine('playerWins', 3000);
             await dealer.deathFall();
             if (state.playerRoundWins >= 2) {
-                await showMessage('YOU WIN', 5000);
+                const winMsg = gameMode === 'ai' ? 'YOU WIN' : 'PLAYER 1 WINS';
+                await showMessage(winMsg, 5000);
+                if (gameMode === 'online' && online.isHost) sendToGuest({ type: 'gameOver', guestWon: false });
                 showGameOver(true);
                 return;
             }
-            await showMessage(`YOU WIN ROUND ${state.round}`, 2500);
+            const winMsg = gameMode === 'ai' ? `YOU WIN ROUND ${state.round}` : `PLAYER 1 WINS ROUND ${state.round}`;
+            await showMessage(winMsg, 2500);
             await roundTransition();
             state.round++;
             state.playerCharges = ROUND_MAX_CHARGES;
@@ -1043,9 +1470,18 @@ async function runState() {
         if (state.isPlayerTurn) {
             ui.playerActions.classList.remove('hidden');
             state.isAnimating = false;
+            if (gameMode === 'online' && online.isHost) sendStateToGuest();
             return; // Exit the loop to wait for player input
         } else {
-            await dealerTurn();
+            if (gameMode === 'ai') {
+                await dealerTurn();
+            } else if (gameMode === 'local') {
+                await player2Turn();
+                return; // player2Turn exits; handlePlayer2Choice re-enters runState
+            } else if (gameMode === 'online' && online.isHost) {
+                await waitForGuestAction();
+            }
+            // Online guest: runState is never called, they respond to host messages
         }
     }
 }
@@ -1336,6 +1772,9 @@ function updateUI(showShells = false) {
 }
 
 function showMessage(msg, duration = 2000) {
+    if (gameMode === 'online' && online.isHost) {
+        sendToGuest({ type: 'message', text: msg, duration });
+    }
     return new Promise(resolve => {
         ui.messageBox.textContent = msg;
         ui.messageBox.classList.remove('hidden');
