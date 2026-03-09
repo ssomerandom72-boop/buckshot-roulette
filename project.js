@@ -698,6 +698,10 @@ async function usePlayerItem(itemType) {
             break;
     }
 
+    if (gameMode === 'online' && online.isHost && itemType !== 'magnifying') {
+        sendToGuest({ type: 'itemAnim', item: itemType });
+    }
+
     updateUI();
 }
 
@@ -757,20 +761,20 @@ async function applyDealerItem(itemType) {
                 state.dealerCharges++;
                 updateUI();
             }
-            await showMessage(`Dealer uses ${ITEM_NAMES[itemType]}.`, 1600);
+            await Promise.all([animateCigarettes(), showMessage(`Dealer uses ${ITEM_NAMES[itemType]}.`, 1600)]);
             break;
 
         case 'expired_med':
             state.dealerCharges = Math.max(0, state.dealerCharges - 1);
             updateUI();
-            await showMessage('Dealer uses EXPIRED MED. Oops.', 1600);
+            await Promise.all([animateExpiredMed(), showMessage('Dealer uses EXPIRED MED. Oops.', 1600)]);
             break;
 
         case 'beer': {
             const ejected = state.chamber.shift();
             if (ejected) state.liveRounds--; else state.blankRounds--;
             const label = ejected ? 'LIVE' : 'BLANK';
-            await showMessage(`Dealer uses BEER. Ejected a ${label}.`, 1800);
+            await Promise.all([animateBeer(ejected), showMessage(`Dealer uses BEER. Ejected a ${label}.`, 1800)]);
             // Reset dealer's knowledge since chamber shifted
             state.dealerKnowsNextShell = false;
             updateUI();
@@ -779,18 +783,18 @@ async function applyDealerItem(itemType) {
 
         case 'handcuffs':
             state.playerCuffed = true;
-            await showMessage('Dealer uses HANDCUFFS on you!', 1800);
+            await Promise.all([animateHandcuffs(), showMessage('Dealer uses HANDCUFFS on you!', 1800)]);
             break;
 
         case 'phone':
             // Dealer already knows own HP, do nothing meaningful
-            await showMessage('Dealer picks up the PHONE...', 1400);
+            await Promise.all([animatePhone(), showMessage('Dealer picks up the PHONE...', 1400)]);
             break;
 
         case 'saw':
             state.sawActive = true;
             showDealerLine('useSaw');
-            await showMessage('Dealer uses SAW!', 1600);
+            await Promise.all([animateSaw(), showMessage('Dealer uses SAW!', 1600)]);
             break;
 
         case 'inverter': {
@@ -805,7 +809,7 @@ async function applyDealerItem(itemType) {
                 }
                 state.dealerNextShellIsLive = state.chamber.length > 0 ? state.chamber[0] : false;
                 showDealerLine('useInverter');
-                await showMessage('Dealer uses INVERTER.', 1600);
+                await Promise.all([animateInverter(), showMessage('Dealer uses INVERTER.', 1600)]);
             }
             break;
         }
@@ -816,9 +820,9 @@ async function applyDealerItem(itemType) {
                 const stolen = state.playerInventory.splice(rIdx, 1)[0];
                 updateUI();
                 showDealerLine('useKnife');
-                await showMessage(`Dealer uses KNIFE. Your ${ITEM_NAMES[stolen]} is gone!`, 2000);
+                await Promise.all([animateKnife(), showMessage(`Dealer uses KNIFE. Your ${ITEM_NAMES[stolen]} is gone!`, 2000)]);
             } else {
-                await showMessage('Dealer uses KNIFE. You had nothing.', 1600);
+                await Promise.all([animateKnife(), showMessage('Dealer uses KNIFE. You had nothing.', 1600)]);
             }
             break;
         }
@@ -928,6 +932,12 @@ function handleHostMessage(data) {
         case 'gameOver':
             showGameOver(data.guestWon);
             break;
+        case 'anim':
+            playAnimForGuest(data);
+            break;
+        case 'itemAnim':
+            playItemAnimForGuest(data.item);
+            break;
         case 'dealerLine':
             showDealerLine(data.cat, data.dur);
             break;
@@ -973,6 +983,7 @@ async function waitForGuestAction() {
             if (idx !== -1) {
                 state.dealerInventory.splice(idx, 1);
                 await applyDealerItem(action.useItem);
+                if (action.useItem !== 'magnifying') sendToGuest({ type: 'itemAnim', item: action.useItem });
                 sendStateToGuest();
             }
         } else {
@@ -980,6 +991,39 @@ async function waitForGuestAction() {
             await processGuestShot(action.shootTarget === 'player');
             return;
         }
+    }
+}
+
+async function playItemAnimForGuest(item) {
+    sounds.playItemUse();
+    switch (item) {
+        case 'cigarettes': case 'medication': await animateCigarettes(); break;
+        case 'expired_med': await animateExpiredMed(); break;
+        case 'beer': await animateBeer(false); break;
+        case 'handcuffs': await animateHandcuffs(); break;
+        case 'phone': await animatePhone(); break;
+        case 'saw': await animateSaw(); break;
+        case 'inverter': await animateInverter(); break;
+        case 'knife': await animateKnife(); break;
+    }
+}
+
+async function playAnimForGuest({ wasLive, hitTarget, guestWasHit }) {
+    if (wasLive) {
+        sounds.playShot();
+        createMuzzleFlash();
+        ejectShell(true);
+        await triggerShotEffects();
+        if (hitTarget === 'dealer') {
+            createBloodSplatter(new THREE.Vector3(0, 1.5, -0.6));
+            await dealer.fallBack();
+        } else {
+            createBloodSplatter(new THREE.Vector3(0, 1.5, 0.6));
+        }
+        if (guestWasHit) flashBloodScreen();
+    } else {
+        sounds.playClick();
+        ejectShell(false);
     }
 }
 
@@ -1030,6 +1074,13 @@ async function processGuestShot(shootPlayer) {
             state.isPlayerTurn = false;
         }
     }
+
+    sendToGuest({
+        type: 'anim',
+        wasLive,
+        hitTarget: shootPlayer ? 'player' : 'dealer',
+        guestWasHit: !shootPlayer && wasLive,
+    });
 
     await Promise.all([
         animateShotgun(shotgunInitialPos, new THREE.Euler(0, -Math.PI / 2, 0)),
@@ -1722,6 +1773,15 @@ async function handlePlayerChoice(isShootingDealer) {
             await showMessage("Click. Blank. Your turn again.");
             state.isPlayerTurn = true;
         }
+    }
+
+    if (gameMode === 'online' && online.isHost) {
+        sendToGuest({
+            type: 'anim',
+            wasLive,
+            hitTarget: isShootingDealer ? 'dealer' : 'player',
+            guestWasHit: isShootingDealer && wasLive,
+        });
     }
 
     await animateShotgun(shotgunInitialPos, new THREE.Euler(0, -Math.PI / 2, 0));
