@@ -8,6 +8,7 @@ export class DealerModel {
         this.headMesh = null;
         this._deathPivot = null;
         this.rightArmPivot = null;
+        this.eyeLights = [];
         this.build();
     }
 
@@ -145,6 +146,7 @@ export class DealerModel {
             const glow = new THREE.PointLight(0xff1100, 1.5, 0.7);
             glow.position.copy(eye.position);
             this.group.add(glow);
+            this.eyeLights.push(glow);
         }
 
         // No face texture — pure 3D head with glowing eyes
@@ -291,6 +293,7 @@ export class DealerModel {
         });
     }
 
+    setEyeIntensity(val) { for (const light of this.eyeLights) light.intensity = val; }
     getHeadMesh() { return this.headMesh; }
     getGroup()    { return this.group; }
     setPosition(x, y, z) { this.group.position.set(x, y, z); }

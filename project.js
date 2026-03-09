@@ -39,6 +39,7 @@ const state = {
     playerCuffed: false,   // player must shoot self next turn
     dealerKnowsNextShell: false, // dealer used magnifying glass
     dealerNextShellIsLive: false,
+    stats: { shotsFired: 0, liveHits: 0, blanksFired: 0, damageTaken: 0, itemsUsed: 0 },
 };
 const ui = {
     playerCharges: document.getElementById('player-charges'),
@@ -586,12 +587,13 @@ async function usePlayerItem(itemType) {
     const idx = state.playerInventory.indexOf(itemType);
     if (idx === -1) return;
     state.playerInventory.splice(idx, 1);
-    sounds.playItemUse();
+    state.stats.itemsUsed++;
     updateUI();
 
     switch (itemType) {
         case 'cigarettes':
         case 'medication':
+            sounds.playItemUse();
             if (state.playerCharges < state.maxCharges) {
                 state.playerCharges++;
                 updateUI();
@@ -602,12 +604,14 @@ async function usePlayerItem(itemType) {
             break;
 
         case 'expired_med':
+            sounds.playItemUse();
             state.playerCharges = Math.max(0, state.playerCharges - 1);
             updateUI();
             await Promise.all([animateExpiredMed(), showMessage('EXPIRED MED. Lost 1 HP!', 1800)]);
             break;
 
         case 'magnifying': {
+            sounds.playItemUse();
             const next = state.chamber[0];
             const label = next ? 'LIVE' : 'BLANK';
             await Promise.all([animateMagnifying(), showMessage(`Next shell: ${label}`, 2500)]);
@@ -615,6 +619,7 @@ async function usePlayerItem(itemType) {
         }
 
         case 'beer': {
+            sounds.playBeerPop();
             const ejected = state.chamber.shift();
             if (ejected) state.liveRounds--; else state.blankRounds--;
             const label = ejected ? 'LIVE' : 'BLANK';
@@ -624,20 +629,24 @@ async function usePlayerItem(itemType) {
         }
 
         case 'handcuffs':
+            sounds.playCuffClick();
             state.dealerCuffed = true;
             await Promise.all([animateHandcuffs(), showMessage('Handcuffs! Dealer must shoot themselves next turn.', 2200)]);
             break;
 
         case 'phone':
+            sounds.playPhoneBuzz();
             await Promise.all([animatePhone(), showMessage(`Phone: Dealer has ${state.dealerCharges} HP.`, 2200)]);
             break;
 
         case 'saw':
+            sounds.playItemUse();
             state.sawActive = true;
             await Promise.all([animateSaw(), showMessage('SAW! Next shot deals double damage.', 2000)]);
             break;
 
         case 'inverter': {
+            sounds.playItemUse();
             if (state.chamber.length > 0) {
                 state.chamber[0] = !state.chamber[0];
                 if (state.chamber[0]) { state.liveRounds++; state.blankRounds--; }
@@ -650,6 +659,7 @@ async function usePlayerItem(itemType) {
         }
 
         case 'knife': {
+            sounds.playItemUse();
             if (state.dealerInventory.length === 0) {
                 await Promise.all([animateKnife(), showMessage('Knife: Dealer has no items!', 1800)]);
             } else {
@@ -803,6 +813,26 @@ async function applyDealerItem(itemType) {
     updateUI();
 }
 
+let isPaused = false;
+function togglePause() {
+    if (ui.gameOverScreen && !ui.gameOverScreen.classList.contains('hidden')) return;
+    isPaused = !isPaused;
+    document.getElementById('pause-menu').classList.toggle('hidden', !isPaused);
+    if (isPaused) renderer.setAnimationLoop(null);
+    else { renderer.setAnimationLoop(null); animate(); }
+}
+
+async function playIntro() {
+    const lines = [
+        ['Welcome.', 1800],
+        ['One shotgun. Live rounds. Blank rounds.', 2200],
+        ['Shoot the dealer — or shoot yourself.', 2200],
+        ['Best 2 out of 3.', 1800],
+        ["Good luck. You'll need it.", 2200],
+    ];
+    for (const [msg, dur] of lines) await showMessage(msg, dur);
+}
+
 // =========== INITIALIZATION ===========
 function init() {
     debug.textContent = 'init() called.';
@@ -871,6 +901,26 @@ function init() {
     // Models
     const table = new TableModel(scene);
     table.setPosition(0, 1.0, 0);
+
+    // Scatter playing cards on table
+    const cardMat = new THREE.MeshStandardMaterial({ color: 0xf0e8d0, roughness: 0.85 });
+    [[-0.32,-0.18],[0.22,-0.28],[-0.14,0.12],[0.38,0.16],[0.08,-0.32]].forEach(([x,z]) => {
+        const card = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.003, 0.1), cardMat);
+        card.position.set(x, 1.068, z);
+        card.rotation.y = (Math.random()-0.5) * Math.PI;
+        scene.add(card);
+    });
+    // Poker chips
+    const chipColors = [0xcc2200, 0x2244cc, 0x22aa44, 0xccaa00];
+    [[-0.38,-0.12],[0.28,-0.22],[-0.18,0.22],[0.42,0.08],[-0.08,-0.38],[0.16,0.28]].forEach(([x,z],i) => {
+        const chip = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.028, 0.028, 0.014, 16),
+            new THREE.MeshStandardMaterial({ color: chipColors[i%chipColors.length], roughness: 0.5, metalness: 0.25 })
+        );
+        chip.position.set(x, 1.068, z);
+        scene.add(chip);
+    });
+
     dealer = new DealerModel(scene);
     dealer.setPosition(0, 1.05, -1.05);
     setTimeout(() => { dealerHead = dealer.getHeadMesh(); }, 1000);
@@ -897,13 +947,22 @@ function init() {
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
     });
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') togglePause();
+        if (state.isAnimating || !state.isPlayerTurn) return;
+        if (e.key === 's' || e.key === 'S') handlePlayerChoice(true);
+        if (e.key === 'd' || e.key === 'D') handlePlayerChoice(false);
+    });
+    ui.shootDealerBtn.addEventListener('mouseenter', () => dealer && dealer.setEyeIntensity(5.0));
+    ui.shootDealerBtn.addEventListener('mouseleave', () => dealer && dealer.setEyeIntensity(1.5));
     debug.textContent = 'Event Listeners attached.';
 
     // Start
     updateUI();
     animate();
-    runState();
+    document.getElementById('resume-btn').addEventListener('click', togglePause);
     debug.textContent = 'Game loop started. Initialization complete.';
+    (async () => { await playIntro(); runState(); })();
 }
 
 // =========== CORE GAME STATE MACHINE ===========
@@ -1005,6 +1064,8 @@ function showGameOver(playerWon = false) {
         const loseLines = ['The house always wins.', 'Did you really think you had a chance?', 'Better luck next time.'];
         const pool = playerWon ? winLines : loseLines;
         ui.gameOverSubtitle.textContent = pool[Math.floor(Math.random() * pool.length)];
+        const s = state.stats;
+        ui.gameOverSubtitle.innerHTML += `<br><br><span style="font-size:0.8em;color:#444;letter-spacing:3px">SHOTS: ${s.shotsFired} &nbsp; DAMAGE TAKEN: ${s.damageTaken} &nbsp; ITEMS USED: ${s.itemsUsed}</span>`;
     }
     if (!playerWon) sounds.playLaugh();
     ui.gameOverScreen.classList.remove('hidden');
@@ -1050,6 +1111,7 @@ async function handlePlayerChoice(isShootingDealer) {
     if (isShootingDealer) {
         if (wasLive) {
             state.dealerCharges = Math.max(0, state.dealerCharges - damage);
+            state.stats.liveHits++;
             createBloodSplatter(targetPos);
             const hitMsg = damage > 1 ? `BANG. Dealer hit for ${damage} damage!` : 'BANG. Dealer hit.';
             await Promise.all([dealer.fallBack(), showMessage(hitMsg)]);
@@ -1060,6 +1122,7 @@ async function handlePlayerChoice(isShootingDealer) {
     } else {
         if (wasLive) {
             state.playerCharges = Math.max(0, state.playerCharges - damage);
+            state.stats.damageTaken += damage;
             const hitMsg = damage > 1 ? `BANG. You shot yourself for ${damage} damage!` : 'BANG. You shot yourself.';
             flashBloodScreen();
             await showMessage(hitMsg);
@@ -1152,6 +1215,7 @@ async function dealerTurn() {
     if (shootPlayer) {
         if (wasLive) {
             state.playerCharges = Math.max(0, state.playerCharges - damage);
+            state.stats.damageTaken += damage;
             const hitMsg = damage > 1 ? `BANG. You've been hit for ${damage} damage!` : "BANG. You've been hit.";
             showDealerLine('hitPlayer');
             flashBloodScreen();
@@ -1206,6 +1270,8 @@ function loadNewRound() {
 function fireShell() {
     const shell = state.chamber.shift();
     if (shell) state.liveRounds--; else state.blankRounds--;
+    state.stats.shotsFired++;
+    if (!shell) state.stats.blanksFired++;
     return shell;
 }
 
@@ -1313,7 +1379,25 @@ function ejectShell(isLive) {
         shell.rotation.z += 0.32;
         shell.rotation.x += 0.18;
         shellMat.opacity = t < 0.65 ? 1 : 1 - (t - 0.65) / 0.35;
-        if (t < 1) requestAnimationFrame(anim); else scene.remove(shell);
+        if (t < 1) {
+            requestAnimationFrame(anim);
+        } else {
+            // Land on table surface
+            shell.position.set(
+                (Math.random()-0.5)*0.6,
+                1.072,
+                (Math.random()-0.5)*0.5
+            );
+            shell.rotation.set(Math.PI/2 + (Math.random()-0.5)*0.3, Math.random()*Math.PI*2, 0);
+            shellMat.opacity = 1;
+            // Limit casings to 20
+            if (!window._shellCasings) window._shellCasings = [];
+            window._shellCasings.push(shell);
+            if (window._shellCasings.length > 20) {
+                const old = window._shellCasings.shift();
+                scene.remove(old);
+            }
+        }
     };
     anim();
 }
@@ -1514,6 +1598,11 @@ function animate() {
                 ? 0.4 + Math.random() * 1.5   // rare hard flicker
                 : 5.0 + Math.random() * 0.8;  // normal slight variation
         }
+    }
+
+    if (dealer && dealer.getGroup()) {
+        const idleT = Date.now() / 1000;
+        dealer.getGroup().rotation.y = Math.sin(idleT * 0.35) * 0.04;
     }
 
     const now = Date.now();
@@ -1753,6 +1842,35 @@ sounds.playRoundStart = () => {
         o.type = 'sine'; o.frequency.value = freq;
         g.gain.setValueAtTime(0.28, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.4);
         o.connect(g).connect(audioCtx.destination); o.start(t); o.stop(t+0.4);
+    });
+};
+sounds.playBeerPop = () => {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    const noise = makeNoise(0.08);
+    const bp = audioCtx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 600; bp.Q.value = 0.5;
+    const g = audioCtx.createGain(); g.gain.setValueAtTime(1.2, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.08);
+    noise.connect(bp).connect(g).connect(audioCtx.destination); noise.start(t); noise.stop(t+0.08);
+    const pop = audioCtx.createOscillator(); pop.type = 'sine'; pop.frequency.setValueAtTime(300, t); pop.frequency.exponentialRampToValueAtTime(80, t+0.12);
+    const pg = audioCtx.createGain(); pg.gain.setValueAtTime(0.5, t); pg.gain.exponentialRampToValueAtTime(0.001, t+0.12);
+    pop.connect(pg).connect(audioCtx.destination); pop.start(t); pop.stop(t+0.12);
+};
+sounds.playCuffClick = () => {
+    if (!audioCtx) return;
+    [0, 0.12].forEach(d => {
+        const t = audioCtx.currentTime + d;
+        const n = makeNoise(0.04); const bp = audioCtx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2200; bp.Q.value = 2;
+        const g = audioCtx.createGain(); g.gain.setValueAtTime(1.5, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.04);
+        n.connect(bp).connect(g).connect(audioCtx.destination); n.start(t); n.stop(t+0.05);
+    });
+};
+sounds.playPhoneBuzz = () => {
+    if (!audioCtx) return;
+    [0, 0.18, 0.36].forEach(d => {
+        const t = audioCtx.currentTime + d;
+        const o = audioCtx.createOscillator(); o.type = 'square'; o.frequency.value = 180;
+        const g = audioCtx.createGain(); g.gain.setValueAtTime(0.15, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.14);
+        o.connect(g).connect(audioCtx.destination); o.start(t); o.stop(t+0.14);
     });
 };
 

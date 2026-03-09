@@ -467,6 +467,37 @@
         #blood-overlay.blood-flash {
             animation: blood-flash 0.85s ease-out forwards;
         }
+
+        /* Mobile responsive */
+        @media (max-width: 640px) {
+            .info-bar { padding: 10px 8px 0; gap: 6px; }
+            .health-display { min-width: 80px; padding: 8px 10px; }
+            #dealer-charges, #player-charges { font-size: 1.2em; letter-spacing: 3px; }
+            .health-label { font-size: 0.5em; letter-spacing: 2px; }
+            #round-display { font-size: 0.42em; letter-spacing: 2px; }
+            button { padding: 16px 22px; font-size: 0.85em; letter-spacing: 2px; min-height: 54px; touch-action: manipulation; }
+            .item-btn { padding: 12px 14px; font-size: 0.75em; min-height: 46px; }
+            #shell-info { font-size: 0.7em; padding: 7px 10px; }
+            #message-box { font-size: 1.3em; padding: 18px 24px; letter-spacing: 3px; max-width: 92vw; }
+            #dealer-speech { font-size: 0.65em; top: 125px; white-space: normal; max-width: 80vw; text-align: center; }
+            #game-over-title { font-size: 2.6em; letter-spacing: 7px; }
+            #key-hints { display: none; }
+            .action-row { gap: 12px; }
+        }
+        button { touch-action: manipulation; }
+
+        #pause-menu {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 24px;
+            background: rgba(0,0,0,0.82);
+            z-index: 62;
+            pointer-events: auto;
+        }
     </style>
 </head>
 <body>
@@ -514,6 +545,7 @@
                 <button id="shoot-dealer">Shoot Dealer</button>
                 <button id="shoot-self">Shoot Self</button>
             </div>
+            <div id="key-hints" style="font-size:0.55em;letter-spacing:3px;color:#333;margin-top:4px">[S] SHOOT DEALER &nbsp; [D] SHOOT SELF &nbsp; [ESC] PAUSE</div>
         </div>
     </div>
 
@@ -525,6 +557,11 @@
             <button id="offer-pickup-btn">Pick Up</button>
             <button id="offer-leave-btn">Leave</button>
         </div>
+    </div>
+
+    <div id="pause-menu" class="hidden">
+        <div style="font-size:2.2em;letter-spacing:8px;margin-bottom:24px;color:#cc0000">PAUSED</div>
+        <button id="resume-btn">Resume</button>
     </div>
 
     <div id="game-over-screen" class="hidden">
