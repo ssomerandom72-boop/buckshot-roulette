@@ -20,6 +20,28 @@ const shotgunInitialPos = new THREE.Vector3(0, 1.25, 0.4);
 const ROUND_MAX_CHARGES = 3; // Same HP every round (best 2 of 3)
 let gameMode = 'ai'; // 'ai' | 'local' | 'online'
 const online = { peer: null, conn: null, isHost: false, roomCode: '', _actionResolve: null };
+let p1Cosmetics = { name: 'Player 1', accent: '#cc0000' };
+let p2Cosmetics = { name: 'Player 2', accent: '#2255cc' };
+
+const COSMETICS_STORAGE_KEY = 'buckshot_cosmetics_v1';
+
+function loadCosmeticsFromStorage() {
+    try {
+        const raw = localStorage.getItem(COSMETICS_STORAGE_KEY);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (data?.p1?.name) p1Cosmetics.name = String(data.p1.name).slice(0, 12);
+        if (data?.p1?.accent) p1Cosmetics.accent = String(data.p1.accent);
+        if (data?.p2?.name) p2Cosmetics.name = String(data.p2.name).slice(0, 12);
+        if (data?.p2?.accent) p2Cosmetics.accent = String(data.p2.accent);
+    } catch (e) { /* ignore */ }
+}
+
+function saveCosmeticsToStorage() {
+    try {
+        localStorage.setItem(COSMETICS_STORAGE_KEY, JSON.stringify({ p1: p1Cosmetics, p2: p2Cosmetics }));
+    } catch (e) { /* ignore */ }
+}
 
 const state = {
     round: 1,
@@ -1128,9 +1150,137 @@ async function handlePlayer2Choice(shootPlayer) {
 
 // ── LOBBY ──
 
+function hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1,3), 16);
+    const g = parseInt(hex.slice(3,5), 16);
+    const b = parseInt(hex.slice(5,7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function applyCosmetics() {
+    // Update health panel labels
+    const p1Panel = ui.playerCharges ? ui.playerCharges.closest('.health-display') : null;
+    const p2Panel = ui.dealerCharges ? ui.dealerCharges.closest('.health-display') : null;
+    if (p1Panel) {
+        p1Panel.querySelector('.health-label').textContent = p1Cosmetics.name.toUpperCase();
+        p1Panel.style.borderColor = hexToRgba(p1Cosmetics.accent, 0.85);
+        p1Panel.style.boxShadow = `0 0 16px ${hexToRgba(p1Cosmetics.accent, 0.45)}, inset 0 0 20px rgba(0,0,0,0.65)`;
+    }
+    if (p2Panel) {
+        p2Panel.querySelector('.health-label').textContent = p2Cosmetics.name.toUpperCase();
+        p2Panel.style.borderColor = hexToRgba(p2Cosmetics.accent, 0.85);
+        p2Panel.style.boxShadow = `0 0 16px ${hexToRgba(p2Cosmetics.accent, 0.45)}, inset 0 0 20px rgba(0,0,0,0.65)`;
+    }
+    // Inject dynamic CSS for charge dot colors
+    let styleEl = document.getElementById('cosmetics-style');
+    if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'cosmetics-style';
+        document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = `
+        #player-charges .charge-live { color: ${p1Cosmetics.accent}; text-shadow: 0 0 8px ${hexToRgba(p1Cosmetics.accent, 0.9)}; }
+        #dealer-charges .charge-live { color: ${p2Cosmetics.accent}; text-shadow: 0 0 8px ${hexToRgba(p2Cosmetics.accent, 0.9)}; }
+    `;
+}
+
+function showCosmeticsScreen(label) {
+    return new Promise(resolve => {
+        const screen = document.getElementById('cosmetics-screen');
+        document.getElementById('cosmetics-player-label').textContent = `CUSTOMIZE — ${label}`;
+        document.getElementById('player-name-input').value = '';
+        screen.classList.remove('hidden');
+
+        let selectedAccent = '#cc0000';
+
+        const swatches = document.querySelectorAll('.swatch');
+        swatches.forEach(s => {
+            s.classList.toggle('active', s.dataset.color === selectedAccent);
+            // Remove old listeners by cloning
+            const fresh = s.cloneNode(true);
+            s.parentNode.replaceChild(fresh, s);
+        });
+        document.querySelectorAll('.swatch').forEach(s => {
+            s.addEventListener('click', () => {
+                selectedAccent = s.dataset.color;
+                document.querySelectorAll('.swatch').forEach(x => x.classList.toggle('active', x === s));
+            });
+        });
+
+        const doneBtn = document.getElementById('cosmetics-done-btn');
+        const fresh = doneBtn.cloneNode(true);
+        doneBtn.parentNode.replaceChild(fresh, doneBtn);
+        document.getElementById('cosmetics-done-btn').addEventListener('click', () => {
+            const name = document.getElementById('player-name-input').value.trim() || label;
+            screen.classList.add('hidden');
+            resolve({ name, accent: selectedAccent });
+        }, { once: true });
+    });
+}
+
 function showLobby() {
     return new Promise(resolve => {
         const lobby = document.getElementById('lobby-screen');
+
+        const lobbyButtons = document.getElementById('lobby-buttons');
+        const onlineSetup = document.getElementById('online-setup');
+        const lockerScreen = document.getElementById('locker-screen');
+
+        const showMainButtons = () => {
+            lockerScreen.classList.add('hidden');
+            onlineSetup.classList.add('hidden');
+            lobbyButtons.classList.remove('hidden');
+        };
+
+        const showLocker = () => {
+            lobbyButtons.classList.add('hidden');
+            onlineSetup.classList.add('hidden');
+            lockerScreen.classList.remove('hidden');
+        };
+
+        const showOnline = () => {
+            lobbyButtons.classList.add('hidden');
+            lockerScreen.classList.add('hidden');
+            onlineSetup.classList.remove('hidden');
+        };
+
+        // Locker wiring
+        const p1Name = document.getElementById('locker-p1-name');
+        const p2Name = document.getElementById('locker-p2-name');
+
+        const setActiveSwatch = (player, color) => {
+            document.querySelectorAll(`.swatch[data-player="${player}"]`).forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.color === color);
+            });
+        };
+
+        if (p1Name) p1Name.value = p1Cosmetics.name || 'Player 1';
+        if (p2Name) p2Name.value = p2Cosmetics.name || 'Player 2';
+        setActiveSwatch('p1', p1Cosmetics.accent);
+        setActiveSwatch('p2', p2Cosmetics.accent);
+
+        document.querySelectorAll('.swatch[data-player="p1"]').forEach(btn => {
+            btn.addEventListener('click', () => { p1Cosmetics.accent = btn.dataset.color; setActiveSwatch('p1', p1Cosmetics.accent); });
+        });
+        document.querySelectorAll('.swatch[data-player="p2"]').forEach(btn => {
+            btn.addEventListener('click', () => { p2Cosmetics.accent = btn.dataset.color; setActiveSwatch('p2', p2Cosmetics.accent); });
+        });
+
+        const lockerBackBtn = document.getElementById('locker-back-btn');
+        if (lockerBackBtn) lockerBackBtn.addEventListener('click', () => { showMainButtons(); });
+
+        const lockerSaveBtn = document.getElementById('locker-save-btn');
+        if (lockerSaveBtn) lockerSaveBtn.addEventListener('click', async () => {
+            p1Cosmetics.name = (p1Name?.value || 'Player 1').trim().slice(0, 12) || 'Player 1';
+            p2Cosmetics.name = (p2Name?.value || 'Player 2').trim().slice(0, 12) || 'Player 2';
+            saveCosmeticsToStorage();
+            applyCosmetics();
+            await showMessage('LOCKER SAVED.', 1200);
+        });
+
+        document.getElementById('mode-locker').addEventListener('click', () => {
+            showLocker();
+        });
 
         document.getElementById('mode-ai').addEventListener('click', () => {
             lobby.classList.add('hidden');
@@ -1143,8 +1293,7 @@ function showLobby() {
         });
 
         document.getElementById('mode-online').addEventListener('click', () => {
-            document.getElementById('lobby-buttons').classList.add('hidden');
-            document.getElementById('online-setup').classList.remove('hidden');
+            showOnline();
         });
 
         document.getElementById('create-room-btn').addEventListener('click', () => {
@@ -1232,6 +1381,10 @@ async function playIntro() {
 // =========== INITIALIZATION ===========
 function init() {
     debug.textContent = 'init() called.';
+
+    // Load saved cosmetics
+    loadCosmeticsFromStorage();
+    applyCosmetics();
 
     // Renderer
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });

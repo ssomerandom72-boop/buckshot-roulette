@@ -486,6 +486,60 @@
         }
         button { touch-action: manipulation; }
 
+        /* ── COSMETICS ── */
+        #cosmetics-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+            width: 280px;
+        }
+        #cosmetics-player-label {
+            font-size: 0.52em;
+            letter-spacing: 6px;
+            color: #4a0000;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        #player-name-input {
+            background: rgba(6,0,3,0.92);
+            border: 1px solid #8b0000;
+            color: #fff;
+            padding: 13px 16px;
+            font-size: 1em;
+            letter-spacing: 4px;
+            font-family: inherit;
+            width: 100%;
+            text-align: center;
+            outline: none;
+            box-shadow: 0 0 8px rgba(139,0,0,0.35);
+        }
+        #player-name-input::placeholder { color: #2a0000; letter-spacing: 2px; }
+        #accent-label {
+            font-size: 0.5em;
+            letter-spacing: 6px;
+            color: #3a0000;
+            text-transform: uppercase;
+        }
+        #accent-swatches {
+            display: flex;
+            gap: 12px;
+        }
+        .swatch {
+            width: 34px;
+            height: 34px;
+            border: 2px solid rgba(255,255,255,0.0);
+            cursor: pointer;
+            padding: 0;
+            min-height: unset;
+            box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
+            transition: border-color 0.12s, transform 0.1s;
+            animation: none !important;
+            touch-action: manipulation;
+        }
+        .swatch:hover { transform: scale(1.18); background: inherit; color: inherit; animation: none !important; }
+        .swatch.active { border-color: rgba(255,255,255,0.85); transform: scale(1.18); box-shadow: 0 0 10px rgba(255,255,255,0.3); }
+
         #pause-menu {
             position: fixed;
             inset: 0;
@@ -686,6 +740,20 @@
                 <button id="mode-ai">VS AI</button>
                 <button id="mode-local">LOCAL 2P</button>
                 <button id="mode-online">ONLINE 2P</button>
+            </div>
+            <div id="cosmetics-screen" class="hidden">
+                <div id="cosmetics-player-label">CUSTOMIZE — PLAYER 1</div>
+                <input id="player-name-input" placeholder="Enter name..." maxlength="12" autocomplete="off" spellcheck="false">
+                <div id="accent-label">COLOR</div>
+                <div id="accent-swatches">
+                    <button class="swatch active" data-color="#cc0000" style="background:#cc0000" title="Crimson"></button>
+                    <button class="swatch" data-color="#2255cc" style="background:#2255cc" title="Cobalt"></button>
+                    <button class="swatch" data-color="#00aa44" style="background:#00aa44" title="Emerald"></button>
+                    <button class="swatch" data-color="#cc8800" style="background:#cc8800" title="Gold"></button>
+                    <button class="swatch" data-color="#9922cc" style="background:#9922cc" title="Violet"></button>
+                    <button class="swatch" data-color="#999999" style="background:#999999" title="Silver"></button>
+                </div>
+                <button id="cosmetics-done-btn">CONTINUE</button>
             </div>
             <div id="online-setup" class="hidden">
                 <div id="online-options">
