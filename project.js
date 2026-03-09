@@ -735,13 +735,16 @@ function init() {
     // Renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0x0a0a0a);
+    renderer.setClearColor(0x000000, 0);
     renderer.shadowMap.enabled = true;
     document.getElementById('scene-container').appendChild(renderer.domElement);
     debug.textContent = 'Renderer created and attached.';
 
     // Scene & Camera
     scene = new THREE.Scene();
+    new THREE.TextureLoader().load('claudeusetsasthebackround.jpg', (tex) => {
+        scene.background = tex;
+    });
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
     camera.position.set(0, 1.8, 2);
     camera.lookAt(0, 1, 0);

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ss:*)",
+      "Bash(git:*)",
+      "WebFetch(domain:ssomerandom72-boop.github.io)"
+    ]
+  }
+}
