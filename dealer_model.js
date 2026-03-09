@@ -147,14 +147,7 @@ export class DealerModel {
             this.group.add(glow);
         }
 
-        // Face texture — big and prominent
-        const textureLoader = new THREE.TextureLoader();
-        textureLoader.load('Thedealer.webp', (texture) => {
-            const headMat = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
-            this.headMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.52, 0.52), headMat);
-            this.headMesh.position.set(0, 0.79, 0.165);
-            this.group.add(this.headMesh);
-        });
+        // No face texture — pure 3D head with glowing eyes
 
         // ── HAT ──
         const hatBrim  = new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.31, 0.036, 32), hatMat);

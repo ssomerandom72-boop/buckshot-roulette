@@ -1545,9 +1545,6 @@ function animate() {
         }
     }
 
-    if (dealerHead) {
-        dealerHead.lookAt(camera.position);
-    }
 
     // Animate offered item — bob and spin
     if (offerMesh) {
